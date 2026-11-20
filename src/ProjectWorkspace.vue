@@ -6,29 +6,30 @@ import ProjectGraph from './ProjectGraph.vue'
 import ProjectAtlas from './ProjectAtlas.vue'
 import AnalysisCoverage from './AnalysisCoverage.vue'
 import AnalysisContext from './AnalysisContext.vue'
+import { usePlanSource } from './usePlanSource'
 import type { LiveEvent,LiveSnapshot,LiveTarget } from './liveActivity'
 import {planKindLabel,type PlanState,type StartProjectRun} from './projectPlan'
-const props=defineProps<{project:{id:string;name:string;root:string};snapshot:LiveSnapshot|null;connected:boolean;selectedThread:string|null;events:LiveEvent[];pulses:LiveEvent[];externalTarget?:LiveTarget|null}>()
-const emit=defineEmits<{selectThread:[id:string|null];appTarget:[target:LiveTarget];demo:[path:string]}>()
+const props=defineProps<{project:{id:string;name:string;root:string};snapshot:LiveSnapshot|null;connected:boolean;selectedThread:string|null;events:LiveEvent[];pulses:LiveEvent[];suspended?:boolean}>()
+const emit=defineEmits<{selectThread:[id:string|null];appTarget:[target:LiveTarget];demo:[path:string];chain:[id:string]}>()
 const locateRequest=ref(0)
 const state=ref<PlanState|null>(null),error=ref(''),loadError=ref(''),busy=ref(false),selectedId=ref(''),search=ref(''),showPlanning=ref(false),follow=ref(false)
 const selected=computed(()=>state.value?.document.nodes.find(n=>n.id===selectedId.value)??null)
 const filtered=computed(()=>state.value?.document.nodes.filter(n=>`${n.title} ${n.description} ${planKindLabel[n.kind]}`.toLowerCase().includes(search.value.toLowerCase()))??[])
 const activeRun=computed(()=>state.value?.runs.find(r=>r.status==='starting'||r.status==='running'))
 const versions=ref<{revision:number;createdAt:string}[]>([]),showVersions=ref(false)
-const snippet=ref<{file:string;start:number;lines:string[]}|null>(null),snippetError=ref(''),sourceLoading=ref(false)
-let sourceRequest=0,loadRequest=0,scanAttempted=false
+const {snippet,snippetError,sourceLoading,source,closeSource}=usePlanSource(()=>props.project.id,()=>state.value?.document)
+let loadRequest=0,scanAttempted=false
 let controller:AbortController|undefined,timer:number|undefined,generation=0
 async function load(){
  const id=props.project.id,gen=generation,request=++loadRequest
  try{const response=await fetch(`/api/projects/${encodeURIComponent(id)}/workbench`,{signal:controller?.signal});if(!response.ok)throw new Error('读取项目档案失败。');const data=await response.json() as PlanState;if(gen===generation&&request===loadRequest){loadError.value='';state.value=data;if(!data.analysis&&!scanAttempted){scanAttempted=true;void scanInventory()}if(selectedId.value&&!data.document.nodes.some(n=>n.id===selectedId.value))selectedId.value=''}}catch(cause){if(gen===generation&&request===loadRequest&&!controller?.signal.aborted)loadError.value=cause instanceof Error?cause.message:'连接失败'}
 }
 watch(()=>props.project.id,()=>{
- generation++;scanAttempted=false;controller?.abort();window.clearTimeout(timer);controller=new AbortController();state.value=null;error.value='';selectedId.value='';search.value='';showPlanning.value=false;busy.value=false;snippet.value=null;sourceRequest++;snippetError.value='';sourceLoading.value=false;loadError.value='';follow.value=false;showVersions.value=false;versions.value=[]
+ generation++;scanAttempted=false;controller?.abort();window.clearTimeout(timer);controller=new AbortController();state.value=null;error.value='';selectedId.value='';search.value='';showPlanning.value=false;busy.value=false;closeSource();loadError.value='';follow.value=false;showVersions.value=false;versions.value=[]
  const gen=generation
- const poll=async()=>{await load();if(gen===generation&&!controller?.signal.aborted)timer=window.setTimeout(poll,2500)};void poll()
+ const poll=async()=>{if(!props.suspended||!state.value)await load();if(gen===generation&&!controller?.signal.aborted)timer=window.setTimeout(poll,2500)};void poll()
 },{immediate:true})
-watch(selectedId,()=>{sourceRequest++;snippet.value=null;snippetError.value='';sourceLoading.value=false})
+watch(selectedId,closeSource)
 onBeforeUnmount(()=>{generation++;controller?.abort();window.clearTimeout(timer)})
 async function scanInventory(){
  if(busy.value||activeRun.value)return;busy.value=true;error.value='';const gen=generation
@@ -50,19 +51,8 @@ async function loadVersions(){
  try{const response=await fetch(`/api/projects/${encodeURIComponent(props.project.id)}/plan-versions`,{signal:controller?.signal});if(!response.ok)throw new Error('版本记录读取失败。');const data=await response.json();if(gen===generation)versions.value=data}catch(cause){if(gen===generation&&!controller?.signal.aborted)error.value=cause instanceof Error?cause.message:'版本读取失败'}
 }
 function locate(target:LiveTarget){if(target.group==='项目图谱'){selectedId.value=target.key??'';locateRequest.value++}else emit('appTarget',target)}
-watch(()=>props.externalTarget,target=>{if(target)locate(target)},{immediate:true})
 let followed=''
-watch(()=>props.pulses,events=>{if(!follow.value)return;const event=[...events].reverse().find(e=>e.targets.some(t=>t.group==='项目图谱'));if(!event||followed===`${event.id}:${event.version}`)return;followed=`${event.id}:${event.version}`;const target=event.targets.find(t=>t.group==='项目图谱');if(target)locate(target)})
-async function source(node:string,index:number,edge?:number){
- const request=++sourceRequest,gen=generation;snippet.value=null;snippetError.value='';sourceLoading.value=true
- const relation=edge===undefined?undefined:state.value?.document.edges[edge]
- const proof=(relation??state.value?.document.nodes.find(n=>n.id===node))?.evidence[index]
- const query=new URLSearchParams({evidence:String(index)})
- if(relation){query.set('from',relation.from);query.set('to',relation.to);query.set('label',relation.label)}else query.set('node',node)
- if(proof){query.set('proofFile',proof.file);query.set('proofMatch',proof.match??'')}
- try{const response=await fetch(`/api/projects/${encodeURIComponent(props.project.id)}/plan-source?${query}`,{signal:controller?.signal});if(!response.ok)throw new Error('此源码位置已变化或暂不可读。');const data=await response.json();if(request===sourceRequest&&gen===generation)snippet.value=data}
- catch(cause){if(request===sourceRequest&&gen===generation&&!controller?.signal.aborted)snippetError.value=cause instanceof Error?cause.message:'读取源码失败'}finally{if(request===sourceRequest&&gen===generation)sourceLoading.value=false}
-}
+watch(()=>props.pulses,events=>{if(!follow.value||props.suspended)return;const event=[...events].reverse().find(e=>e.targets.some(t=>t.group==='项目图谱'));if(!event||followed===`${event.id}:${event.version}`)return;followed=`${event.id}:${event.version}`;const target=event.targets.find(t=>t.group==='项目图谱');if(target)locate(target)})
 const nodeState={existing:'已有实现 · 未代表验收',planned:'计划新增',unknown:'待确认'}
 </script>
 <template>
@@ -84,7 +74,7 @@ const nodeState={existing:'已有实现 · 未代表验收',planned:'计划新�
    <PlanningPanel v-if="showPlanning" :key="project.id" :state="state" :selected-node="selected" :busy="busy" :error="error" @start="start" @interrupt="interrupt" />
    <div class="universal-columns">
     <section class="universal-map" aria-label="通用项目图谱">
-     <ProjectAtlas :project-id="project.id" :ui="state.ui" @previews-changed="load" :document="state.document" :selected-id="selectedId" :focus-token="locateRequest" :events="events" :pulses="pulses" :connected="connected" @select="selectedId=$event" @source="source" @edge="source('',0,$event)" @demo="emit('demo',$event)" />
+     <ProjectAtlas @open="emit('chain',$event)" :project-id="project.id" :ui="state.ui" @previews-changed="load" :document="state.document" :selected-id="selectedId" :focus-token="locateRequest" :events="events" :pulses="pulses" :connected="connected" @select="selectedId=$event" @source="source" @edge="source('',0,$event)" @demo="emit('demo',$event)" />
      <details class="all-node-details"><summary>全部架构与功能卡片（{{state.document.nodes.length}}）</summary>
      <div class="node-tools"><h3>项目架构与功能</h3><input v-model="search" type="search" aria-label="筛选项目卡片" placeholder="筛选模块、功能、文件" /></div>
      <div class="plan-node-grid">
@@ -101,7 +91,7 @@ const nodeState={existing:'已有实现 · 未代表验收',planned:'计划新�
       <ul><li v-for="(e,index) in selected.evidence" :key="`${e.file}:${index}`"><button v-if="e.line>0" type="button" @click="source(selected!.id,index)">{{e.file}}:{{e.line}}</button><code v-else>{{e.file}}</code><span>{{e.valid?'位置已核对':e.reason||'待确认'}}</span></li></ul>
       <p v-if="!selected.evidence.length">尚无源码依据。</p><ul v-if="selected.acceptance.length"><li v-for="criterion in selected.acceptance" :key="criterion">验收：{{criterion}}</li></ul>
      </section>
-     <section v-if="snippet||snippetError||sourceLoading" class="universal-source"><button class="dialog-button" type="button" @click="sourceRequest++;snippet=null;snippetError='';sourceLoading=false">关闭源码</button><p v-if="sourceLoading">正在读取…</p><p v-else-if="snippetError">{{snippetError}}</p><template v-else-if="snippet"><h4>{{snippet.file}}</h4><pre tabindex="0"><code v-for="(line,i) in snippet.lines" :key="i">{{snippet.start+i}}  {{line}}{{'\n'}}</code></pre></template></section>
+     <section v-if="snippet||snippetError||sourceLoading" class="universal-source"><button class="dialog-button" type="button" @click="closeSource()">关闭源码</button><p v-if="sourceLoading">正在读取…</p><p v-else-if="snippetError">{{snippetError}}</p><template v-else-if="snippet"><h4>{{snippet.file}}</h4><pre tabindex="0"><code v-for="(line,i) in snippet.lines" :key="i">{{snippet.start+i}}  {{line}}{{'\n'}}</code></pre></template></section>
      <details v-if="state.document.questions.length" class="plan-questions"><summary>待确认事项（{{state.document.questions.length}}）</summary><ul><li v-for="question in state.document.questions" :key="question">{{question}}</li></ul></details>
     </section>
     <ActivityPanel :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="events" @select-thread="emit('selectThread',$event)" @locate="locate" />

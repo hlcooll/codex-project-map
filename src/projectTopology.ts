@@ -34,7 +34,7 @@ export function projectTopology(document:PlanDocument,selectedId:string,chain:bo
  return {nodes,edges,total:candidates.length,totalEdges,hiddenEdges:totalEdges-edges.length}
 }
 
-export function topologyLayout(nodes:PlanNode[],edges:{from:string;to:string}[]){
+export function topologyLayout(nodes:PlanNode[],edges:{from:string;to:string}[],comfortable=false){
  const ids=new Set(nodes.map(n=>n.id)),rank=new Map<string,number>(),degree=new Map(nodes.map(n=>[n.id,0])),outgoing=new Map<string,string[]>()
  for(const e of edges)if(ids.has(e.from)&&ids.has(e.to)&&e.from!==e.to){degree.set(e.to,degree.get(e.to)!+1);const next=outgoing.get(e.from)??[];next.push(e.to);outgoing.set(e.from,next)}
  const queue=nodes.filter(n=>degree.get(n.id)===0).map(n=>n.id)
@@ -47,11 +47,12 @@ export function topologyLayout(nodes:PlanNode[],edges:{from:string;to:string}[])
  const groups=new Map<number,PlanNode[]>()
  for(const n of nodes){const r=rank.get(n.id)??0;const group=groups.get(r)??[];group.push(n);groups.set(r,group)}
  const positions=new Map<string,{left:number;top:number;width:number;height:number}>();let column=0,maxHeight=260
+ const pitch=comfortable?370:315,width=comfortable?260:224
  for(const [,group]of [...groups.entries()].sort(([a],[b])=>a-b)){
   for(let start=0;start<group.length;start+=8){let top=28
-   for(const n of group.slice(start,start+8)){const height=n.preview?.captures.length?232:150;positions.set(n.id,{left:24+column*315,top,width:224,height});top+=height+35}
+   for(const n of group.slice(start,start+8)){const height=n.preview?.captures.length?(comfortable?310:232):(comfortable?220:150);positions.set(n.id,{left:24+column*pitch,top,width,height});top+=height+35}
    maxHeight=Math.max(maxHeight,top+28);column++
   }
  }
- return {positions,width:Math.max(280,column*315-40),height:maxHeight}
+ return {positions,width:Math.max(280,column*pitch-40),height:maxHeight}
 }

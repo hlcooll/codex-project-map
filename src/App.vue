@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { Folder, Plus } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ProjectCards from './ProjectCards.vue'
 import ProjectDemos from './ProjectDemos.vue'
 import ProjectAppUI from './ProjectAppUI.vue'
 import ProjectWorkspace from './ProjectWorkspace.vue'
+import ProjectChainView from './ProjectChainView.vue'
+import { chainURL, readChainRoute, type ChainRoute } from './chainNavigation'
 import { useProjectActivity, type LiveTarget } from './liveActivity'
 
 interface Project {
@@ -20,9 +22,8 @@ const activeProject = computed(() => projects.value.find(project => project.id =
 const projectSection = ref<'workbench' | 'app-ui' | 'demos' | 'details'>('workbench')
 const { snapshot, connected, selectedThread, visibleEvents, pulses } = useProjectActivity(() => activeProjectId.value)
 const appTarget = ref<LiveTarget | null>(null)
-const planTarget = ref<LiveTarget | null>(null)
 function locateApp(target: LiveTarget) { appTarget.value = { ...target }; projectSection.value = 'app-ui' }
-function locatePlan(target: LiveTarget) { planTarget.value = { ...target }; projectSection.value = 'workbench' }
+function locatePlan(target: LiveTarget) { openChain(target.key ?? '') }
 const linkedDemo = ref('')
 const loadingProjects = ref(true)
 const listError = ref(false)
@@ -30,6 +31,51 @@ const projectDialog = ref<HTMLDialogElement | null>(null)
 const projectPath = ref('')
 const projectError = ref('')
 const addingProject = ref(false)
+const chainRoute = ref<ChainRoute | null>(readChainRoute(window.location.hash))
+const chainProject = computed(() => projects.value.find(project => project.id === chainRoute.value?.project))
+let returnPosition: { left: number; top: number } | null = null, returnFocus: HTMLElement | null = null
+const originalOverflow = document.body.style.overflow
+
+function syncChainRoute() {
+  const previous = chainRoute.value
+  chainRoute.value = readChainRoute(window.location.hash)
+  document.body.style.overflow = chainRoute.value ? 'hidden' : originalOverflow
+  const route = chainRoute.value
+  const savedPosition = window.history.state?.projectMapReturn
+  if (route && Number.isFinite(savedPosition?.left) && Number.isFinite(savedPosition?.top)) returnPosition = savedPosition
+  if (route && projects.value.some(project => project.id === route.project)) {
+    if (activeProjectId.value !== route.project) selectProject(route.project)
+    projectSection.value = route.from
+  }
+  if (previous && !route) void nextTick(() => {
+    if (returnPosition) window.scrollTo(returnPosition)
+    if (returnFocus?.isConnected && returnFocus.getClientRects().length) returnFocus.focus({ preventScroll: true })
+  })
+}
+function openChain(root: string) {
+  if (!activeProject.value) return
+  returnPosition = { left: window.scrollX, top: window.scrollY }
+  returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const route: ChainRoute = { project: activeProjectId.value, root, from: projectSection.value === 'app-ui' ? 'app-ui' : 'workbench' }
+  window.history.pushState({ ...window.history.state, projectMapChain: true, projectMapReturn: returnPosition }, '', chainURL(route))
+  syncChainRoute()
+}
+function closeChain() {
+  if (window.history.state?.projectMapChain) window.history.back()
+  else {
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+    syncChainRoute()
+  }
+}
+function changeChainRoot(root: string) {
+  if (!chainRoute.value) return
+  window.history.replaceState(window.history.state, '', chainURL({ ...chainRoute.value, root }))
+  syncChainRoute()
+}
+function chainDemo(path: string) {
+  window.history.replaceState({ ...window.history.state, projectMapChain: false }, '', window.location.pathname + window.location.search)
+  syncChainRoute(); openDemo(path)
+}
 
 async function loadProjects() {
   loadingProjects.value = true
@@ -38,6 +84,7 @@ async function loadProjects() {
     const response = await fetch('/api/projects')
     if (!response.ok) throw new Error('无法读取项目列表。')
     projects.value = await response.json() as Project[]
+    syncChainRoute()
   } catch {
     listError.value = true
   } finally {
@@ -55,7 +102,6 @@ function selectProject(id: string) {
   activeProjectId.value = id
   linkedDemo.value = ''
   appTarget.value = null
-  planTarget.value = null
   projectSection.value = 'workbench'
 }
 
@@ -98,11 +144,21 @@ async function addProject() {
   }
 }
 
-onMounted(loadProjects)
+onMounted(() => {
+  window.addEventListener('popstate', syncChainRoute)
+  window.addEventListener('hashchange', syncChainRoute)
+  syncChainRoute()
+  void loadProjects()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('popstate', syncChainRoute)
+  window.removeEventListener('hashchange', syncChainRoute)
+  document.body.style.overflow = originalOverflow
+})
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-show="!chainRoute" class="app-shell">
     <aside class="project-sidebar" aria-labelledby="projects-heading">
       <div class="project-sidebar-heading">
         <h1 id="projects-heading">项目</h1>
@@ -134,7 +190,7 @@ onMounted(loadProjects)
           <button class="dialog-button" type="button" :aria-pressed="projectSection === 'demos'" @click="openDemo('')">Demo</button>
           <button class="dialog-button" type="button" :aria-pressed="projectSection === 'details'" @click="projectSection = 'details'">识别详情</button>
         </nav>
-        <ProjectWorkspace v-if="projectSection === 'workbench'" :key="activeProject.id" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="visibleEvents" :pulses="pulses" :external-target="planTarget" @select-thread="selectedThread=$event" @app-target="locateApp" @demo="openDemo" />
+        <ProjectWorkspace v-if="projectSection === 'workbench'" :key="activeProject.id" :suspended="!!chainRoute" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="visibleEvents" :pulses="pulses" @chain="openChain" @select-thread="selectedThread=$event" @app-target="locateApp" @demo="openDemo" />
         <ProjectAppUI v-else-if="projectSection === 'app-ui'" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :visible-events="visibleEvents" :pulses="pulses" :external-target="appTarget" @select-thread="selectedThread=$event" @plan-target="locatePlan" @demo="openDemo" />
         <ProjectDemos v-else-if="projectSection === 'demos'" :project="activeProject" :initial-path="linkedDemo" />
         <ProjectCards v-else :project="activeProject" />
@@ -156,4 +212,12 @@ onMounted(loadProjects)
       </form>
     </dialog>
   </div>
+  <template v-if="chainRoute">
+    <ProjectChainView v-if="chainProject" :key="chainProject.id" :project="chainProject" :root-id="chainRoute.root" :origin="chainRoute.from" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="visibleEvents" :pulses="pulses" @close="closeChain" @root="changeChainRoot" @select-thread="selectedThread=$event" @demo="chainDemo" />
+    <main v-else class="chain-route-error"><h1>{{ loadingProjects ? '正在读取项目…' : listError ? '无法读取项目列表' : '这个项目尚未登记在当前工作台' }}</h1><p v-if="!loadingProjects">可以返回工作台检查项目目录。</p><button v-if="listError" type="button" class="dialog-button" @click="loadProjects">重试</button><button type="button" class="dialog-button" @click="closeChain">返回工作台</button></main>
+  </template>
 </template>
+
+<style scoped>
+.chain-route-error{min-height:100dvh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;padding:24px;text-align:center}.chain-route-error h1{font-size:22px}
+</style>
