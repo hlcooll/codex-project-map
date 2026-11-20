@@ -43,7 +43,21 @@ Xcode 的 `.pbxproj`、`.xcscheme`、`.xcworkspacedata`、`.xcconfig`、`.entitl
 
 Codex 可返回有文件读取证据的 `capabilityGaps`，区分适配器、扫描器和预览缺口。服务核对源码位置，记录建议、验证方法、来源任务和技能版本，按项目保存并在页面显示为「待验证」。业务待办仍放项目待确认事项。分析进程不会修改全局技能或目标项目的 AGENTS.md。
 
-改进流程：从已记录缺口复现问题 → 修改技能规则及必要的扫描器 → 用隔离样例和相关回归检查验证 → 更新 SKILL.md 的 `metadata.version` → 重建并发布工作台。新版本在下一轮使用，不在正在执行的分析里自动切换。技能基础校验可用 skill-creator 的 `quick_validate.py`；后端 `go test ./...` 覆盖迁移、隔离、读取证据及快照完整性。需要验证本机真实 Codex 时，在 `server/` 设置 `PROJECT_MAP_REAL_CODEX=/绝对路径/codex` 并运行 `go test -run '^TestAnalysisSkillRealCodex$' -v -timeout 5m`，使用临时项目和数据库，结束后归档验证会话。
+分析 Skill 的修改、验证和发布步骤见 [分析 Skill 维护流程](CONTRIBUTING.md#分析-skill-维护流程)。新版本在下一轮使用，不在正在执行的分析里自动切换。
+
+## 开发协作与辅助 Skill
+
+继续开发本项目时，先阅读 [AGENTS.md](AGENTS.md) 和 [协作与验证规范](CONTRIBUTING.md)。规范随仓库分发，包含代码职责、并行分工、测试选择及分析 Skill 维护方法。
+
+| Skill | 在本项目中的用途 | 是否随仓库分发 |
+| --- | --- | --- |
+| [project-analyzer](server/skills/project-analyzer/SKILL.md) | 工作台运行时显式调用，分析目标项目并输出有证据的图谱 | 是，包含 Swift/Xcode、Web、Go 参考规则 |
+| `agent-orchestration` | 开发时辅助任务分工、共享资源协调和独立审查 | 否；项目需要的协作规则已写入 CONTRIBUTING.md |
+| `skill-creator` | 开发时辅助编写和检查分析 Skill | 否，属于可选开发工具 |
+| `openai-docs` | 开发时核对 Codex 协议和配置文档 | 否，属于可选开发工具 |
+| `particle-design` | 调整粒子视觉与交互时可参考 | 否；当前运行流程不调用，粒子连线由前端代码实现 |
+
+这些辅助 Skill 不属于运行或构建依赖，也不会由工作台自动安装。没有它们仍可按仓库内规范开发和验证。个人技能目录、Codex 配置和 `.data/analysis-skills/` 运行快照不随源码上传。
 
 ## App 源码关系
 
