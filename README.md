@@ -90,12 +90,37 @@ Codex 可返回有文件读取证据的 `capabilityGaps`，区分适配器、扫
 
 ## 运行
 
-需要 Node.js 22.12 或以上、pnpm、Go 1.24 或以上以及可用的 C 编译器（SQLite 驱动需要 CGO）。以下命令在项目根目录运行。
-
-创建规划和开发任务还需要已登录且支持 App Server 协议的本机 Codex CLI（本次用 `0.169.0-alpha.11.1` 验证）。可用 `-codex-bin /绝对路径/codex` 指定可执行文件；CLI 不可用时，仍可浏览目录扫描和已保存档案。模型连接或登录失败会显示在任务结果中，不会生成虚假的规划成功状态。
+首次构建需要 Node.js 22.12 或以上、pnpm、Go 1.24 或以上以及可用的 C 编译器（SQLite 驱动需要 CGO）。启动脚本支持 macOS 和 Linux，需要 Bash 与 curl。以下命令在项目根目录运行。
 
 ```sh
-pnpm install
+./start.sh
+```
+
+脚本按需安装锁定的前端依赖、构建网页和 Go 服务，等待服务就绪后打开 <http://127.0.0.1:4399/>。源码未变化时复用已有构建。服务在当前终端运行，按 `Ctrl+C` 停止；已有项目和分析数据保留在工作台的 `.data/`。也可以从其他目录用脚本的绝对路径启动。
+
+```sh
+./start.sh --no-open                       # 不自动打开浏览器
+./start.sh --port 4400                     # 改用其他本机端口
+./start.sh --workspace /绝对路径/项目        # 启动时登记指定项目
+./start.sh --data /绝对路径/数据目录         # 使用独立数据目录
+./start.sh --rebuild                       # 强制重新安装锁定依赖并构建
+./start.sh --help
+```
+
+相对的 `--workspace`、`--data` 路径按执行命令时的目录解析；分析会话始终归属工作台目录。同一工作台目录只允许一个启动脚本运行，端口已占用会明确报错。若进程被强制终止后留下 `.data/start.lock`，确认该工作台服务已停止，再移除这个空目录后重试。
+
+创建规划和开发任务还需要已登录且支持 App Server 协议的本机 Codex CLI（本次用 `0.169.0-alpha.11.1` 验证）。脚本优先使用 PATH 中的 Codex，也检查 macOS 桌面应用的常见安装位置；可用 `CODEX_BIN=/绝对路径/codex ./start.sh` 指定。CLI 不可用时，仍可浏览目录扫描和已保存档案。模型连接或登录失败会显示在任务结果中，不会生成虚假的规划成功状态。
+
+工具未加入 PATH 时，可通过 `NODE_BIN`、`PNPM_BIN`、`GO_BIN` 指定绝对路径，例如：
+
+```sh
+NODE_BIN=/绝对路径/node GO_BIN=/绝对路径/go ./start.sh
+```
+
+需要手动构建或直接传递服务参数时：
+
+```sh
+pnpm install --frozen-lockfile
 pnpm build
 mkdir -p bin
 (cd server && go build -o ../bin/project-map .)
