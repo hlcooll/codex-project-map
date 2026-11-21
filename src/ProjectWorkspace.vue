@@ -10,7 +10,7 @@ import { usePlanSource } from './usePlanSource'
 import type { LiveEvent,LiveSnapshot,LiveTarget } from './liveActivity'
 import {planKindLabel,type PlanState,type StartProjectRun} from './projectPlan'
 const props=defineProps<{project:{id:string;name:string;root:string};snapshot:LiveSnapshot|null;connected:boolean;selectedThread:string|null;events:LiveEvent[];pulses:LiveEvent[];suspended?:boolean}>()
-const emit=defineEmits<{selectThread:[id:string|null];appTarget:[target:LiveTarget];demo:[path:string];chain:[id:string]}>()
+const emit=defineEmits<{selectThread:[id:string|null];appTarget:[target:LiveTarget];appPages:[available:boolean];demo:[path:string];chain:[id:string]}>()
 const locateRequest=ref(0)
 const state=ref<PlanState|null>(null),error=ref(''),loadError=ref(''),busy=ref(false),selectedId=ref(''),search=ref(''),showPlanning=ref(false),follow=ref(false)
 const selected=computed(()=>state.value?.document.nodes.find(n=>n.id===selectedId.value)??null)
@@ -30,6 +30,7 @@ watch(()=>props.project.id,()=>{
  const poll=async()=>{if(!props.suspended||!state.value)await load();if(gen===generation&&!controller?.signal.aborted)timer=window.setTimeout(poll,2500)};void poll()
 },{immediate:true})
 watch(selectedId,closeSource)
+watch(state,data=>{if(data)emit('appPages',(data.ui?.total??0)>0)})
 onBeforeUnmount(()=>{generation++;controller?.abort();window.clearTimeout(timer)})
 async function scanInventory(){
  if(busy.value||activeRun.value)return;busy.value=true;error.value='';const gen=generation

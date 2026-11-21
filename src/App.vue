@@ -19,6 +19,7 @@ interface Project {
 const projects = ref<Project[]>([])
 const activeProjectId = ref('')
 const activeProject = computed(() => projects.value.find(project => project.id === activeProjectId.value))
+const hasAppPages = ref(false)
 const projectSection = ref<'workbench' | 'app-ui' | 'demos' | 'details'>('workbench')
 const { snapshot, connected, selectedThread, visibleEvents, pulses } = useProjectActivity(() => activeProjectId.value)
 const appTarget = ref<LiveTarget | null>(null)
@@ -99,6 +100,7 @@ function openProjectDialog() {
 }
 
 function selectProject(id: string) {
+  if (activeProjectId.value !== id) hasAppPages.value = false
   activeProjectId.value = id
   linkedDemo.value = ''
   appTarget.value = null
@@ -186,11 +188,11 @@ onBeforeUnmount(() => {
       <template v-if="activeProject">
         <nav class="project-sections" aria-label="项目页面">
           <button class="dialog-button" type="button" :aria-pressed="projectSection === 'workbench'" @click="projectSection = 'workbench'">项目规划</button>
-          <button v-if="activeProject.kind === '原生 App'" class="dialog-button" type="button" :aria-pressed="projectSection === 'app-ui'" @click="projectSection = 'app-ui'">App 界面</button>
+          <button v-if="activeProject.kind === '原生 App' || hasAppPages || projectSection === 'app-ui'" class="dialog-button" type="button" :aria-pressed="projectSection === 'app-ui'" @click="projectSection = 'app-ui'">App 界面</button>
           <button class="dialog-button" type="button" :aria-pressed="projectSection === 'demos'" @click="openDemo('')">Demo</button>
           <button class="dialog-button" type="button" :aria-pressed="projectSection === 'details'" @click="projectSection = 'details'">识别详情</button>
         </nav>
-        <ProjectWorkspace v-if="projectSection === 'workbench'" :key="activeProject.id" :suspended="!!chainRoute" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="visibleEvents" :pulses="pulses" @chain="openChain" @select-thread="selectedThread=$event" @app-target="locateApp" @demo="openDemo" />
+        <ProjectWorkspace v-if="projectSection === 'workbench'" :key="activeProject.id" :suspended="!!chainRoute" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :events="visibleEvents" :pulses="pulses" @chain="openChain" @select-thread="selectedThread=$event" @app-target="locateApp" @app-pages="hasAppPages = $event" @demo="openDemo" />
         <ProjectAppUI v-else-if="projectSection === 'app-ui'" :project="activeProject" :snapshot="snapshot" :connected="connected" :selected-thread="selectedThread" :visible-events="visibleEvents" :pulses="pulses" :external-target="appTarget" @select-thread="selectedThread=$event" @plan-target="locatePlan" @demo="openDemo" />
         <ProjectDemos v-else-if="projectSection === 'demos'" :project="activeProject" :initial-path="linkedDemo" />
         <ProjectCards v-else :project="activeProject" />
